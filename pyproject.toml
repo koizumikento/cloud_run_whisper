@@ -9,4 +9,40 @@ dependencies = [
     "faster-whisper",
     "hypercorn",
     "uvicorn",
+    "python-multipart",
+    "pydantic-settings",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+  "E",  # pycodestyle errors
+  "F",  # pyflakes
+  "I",  # isort
+  "UP", # pyupgrade
+  "B",  # bugbear
+  "BLE",# blind except
+]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-q --cov=app --cov-report=term-missing:skip-covered"
+testpaths = ["tests"]
+
+[tool.uv]
+dev-dependencies = [
+  "ruff",
+  "pytest",
+  "httpx",
+  "pytest-cov",
 ]

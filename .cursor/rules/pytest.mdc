@@ -1,0 +1,15 @@
+---
+globs: *.py
+---
+テストは `pytest` を使用します。設定は [pyproject.toml](mdc:pyproject.toml) の `[tool.pytest.ini_options]` に記載されています。
+
+推奨:
+
+- テストは `tests/` ディレクトリに配置
+- 実行は `uv run pytest`（静かめの `-q` が既定）
+- 最小バージョン: 8.0
+
+補足:
+
+- 追加オプションは `addopts` に追記してください
+- フィクスチャやプラグインを使う場合は `conftest.py` を `tests/` に配置

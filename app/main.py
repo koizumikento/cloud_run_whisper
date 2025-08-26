@@ -3,11 +3,13 @@ import os
 from dataclasses import asdict
 from shutil import copyfileobj
 from tempfile import NamedTemporaryFile
-from typing import Any, Dict, List
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, UploadFile
 from faster_whisper import WhisperModel
+from pydantic import BaseModel
 
+from .settings import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,24 +17,62 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 
-# モデルを起動時にロード（環境変数で調整可能）
-MODEL_NAME = os.getenv("WHISPER_MODEL", "large-v3-turbo")
-DEVICE = os.getenv("WHISPER_DEVICE", "cuda")
-COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
-
-logger.info(f"Loading model: {MODEL_NAME} on {DEVICE} ({COMPUTE_TYPE})")
-model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
+# Pydantic response models
+class HealthResponse(BaseModel):
+    status: str
+    model: str
+    device: str
 
 
-@app.get("/health")
-def health() -> Dict[str, Any]:
-    return {"status": "ok", "model": MODEL_NAME, "device": DEVICE}
+class Word(BaseModel):
+    start: float
+    end: float
+    word: str
+    prob: float | None = None
 
 
-@app.post("/transcribe")
-def transcribe_audio(upload_file: UploadFile) -> Dict[str, Any]:
+class Segment(BaseModel):
+    id: int
+    start: float
+    end: float
+    text: str
+    words: list[Word]
+
+
+class TranscribeResponse(BaseModel):
+    info: dict[str, Any]
+    segments: list[Segment]
+
+
+# モデルを起動時にロード（pydantic-settings で管理）
+if settings.whisper_skip_load:
+    logger.info("Skipping Whisper model load (WHISPER_SKIP_LOAD=1)")
+    model = None
+else:
+    logger.info(
+        "Loading model: %s on %s (%s)",
+        settings.whisper_model,
+        settings.whisper_device,
+        settings.whisper_compute_type,
+    )
+    model = WhisperModel(
+        settings.whisper_model,
+        device=settings.whisper_device,
+        compute_type=settings.whisper_compute_type,
+    )
+
+
+@app.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
+    return {"status": "ok", "model": settings.whisper_model, "device": settings.whisper_device}
+
+
+@app.post("/transcribe", response_model=TranscribeResponse)
+def transcribe_audio(upload_file: UploadFile) -> TranscribeResponse:
     temp_path = None
     try:
+        if model is None:
+            raise HTTPException(status_code=503, detail="Model not loaded")
         with NamedTemporaryFile(delete=False, suffix=f"-{upload_file.filename}") as tmp:
             temp_path = tmp.name
             copyfileobj(upload_file.file, tmp)
@@ -42,7 +82,7 @@ def transcribe_audio(upload_file: UploadFile) -> Dict[str, Any]:
             word_timestamps=True,
         )
 
-        segment_dicts: List[Dict[str, Any]] = []
+        segment_dicts: list[dict[str, Any]] = []
         for seg in segments:
             segment_dicts.append(
                 {
@@ -69,5 +109,3 @@ def transcribe_audio(upload_file: UploadFile) -> Dict[str, Any]:
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
-
-

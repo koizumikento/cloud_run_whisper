@@ -1,0 +1,21 @@
+---
+globs: *.py
+---
+プロジェクトは [pyproject.toml](mdc:pyproject.toml) の `[tool.ruff]` 設定に従い、Ruff を使用して静的解析とフォーマット整形を行います。
+
+推奨:
+
+- 変更前に `uv run ruff check .` を実行してエラーを確認
+- 自動修正は `uv run ruff check . --fix` を使用
+- フォーマットは `uv run ruff format .` を使用
+
+主なポリシー（抜粋）:
+
+- 行長は 100 文字 (`line-length = 100`)
+- Python バージョンは 3.12 (`target-version = py312`)
+- 対象ルール: E/F/I/UP/B/BLE を選択
+
+補足:
+
+- `.venv`/`build`/`dist` は除外対象です
+- ルール調整は `[tool.ruff.lint]`/`[tool.ruff.format]` で行ってください

@@ -1,10 +1,8 @@
 import argparse
-import os
-import sys
 import logging
+import os
 
 from faster_whisper import WhisperModel
-
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("download_model")
@@ -48,5 +46,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-

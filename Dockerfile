@@ -46,7 +46,7 @@ COPY app /app
 COPY scripts /app/scripts
 
 # モデル事前ダウンロード（ビルド時）
-ENV WHISPER_MODEL=large-v3-turbo
+ENV WHISPER_MODEL=large-v3
 ENV XDG_CACHE_HOME=/root/.cache
 RUN uv run python /app/scripts/download_model.py --device cpu
 

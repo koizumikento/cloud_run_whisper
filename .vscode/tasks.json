@@ -1,0 +1,46 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Tests: Run",
+            "type": "shell",
+            "command": "uv",
+            "args": [
+                "run",
+                "python",
+                "scripts/run_tests.py"
+            ],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Tests: Run (fix)",
+            "type": "shell",
+            "command": "uv",
+            "args": [
+                "run",
+                "python",
+                "scripts/run_tests.py",
+                "--fix"
+            ],
+            "group": "test",
+            "problemMatcher": []
+        },
+        {
+            "label": "Tests: Run (HTML)",
+            "type": "shell",
+            "command": "uv",
+            "args": [
+                "run",
+                "python",
+                "scripts/run_tests.py",
+                "--html"
+            ],
+            "group": "test",
+            "problemMatcher": []
+        }
+    ]
+}
