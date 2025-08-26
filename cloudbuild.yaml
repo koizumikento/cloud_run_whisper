@@ -1,0 +1,51 @@
+substitutions:
+  _REGION: asia-northeast1
+  _REPO: whisper-repo
+  _IMAGE: cloud-run-whisper
+  _TAG: $SHORT_SHA
+  _TAG_LATEST: "false"  # true/1 で latest タグ付与
+  _ARTIFACTS_BUCKET: ""  # 例: my-artifacts-bucket（空ならアップロードしない）
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: "3600s"
+
+steps:
+  # Build & Push with Kaniko
+  - name: "gcr.io/kaniko-project/executor:latest"
+    args:
+      - "--context=."
+      - "--dockerfile=./Dockerfile"
+      - "--destination=$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/$_IMAGE:$_TAG"
+      - "--cache=true"
+      - "--cache-ttl=24h"
+      - "--single-snapshot"
+      - "--verbosity=info"
+
+  # Tag latest (optional), resolve digest, and optionally upload helper files to GCS
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        IMAGE_URI="$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/$_IMAGE:$_TAG"
+        echo -n "$IMAGE_URI" > IMAGE_URI.txt
+        if [[ "$_TAG_LATEST" == "1" || "$_TAG_LATEST" == "true" ]]; then
+          gcloud artifacts docker tags add "$IMAGE_URI" "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/$_IMAGE:latest"
+        fi
+        DIGEST="$(gcloud artifacts docker images describe "$IMAGE_URI" --format='value(image_summary.digest)')"
+        echo -n "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/$_IMAGE@$DIGEST" > IMAGE_URI_DIGEST.txt
+        echo "Pushed: $(cat IMAGE_URI.txt)"
+        echo "Digest: $(cat IMAGE_URI_DIGEST.txt)"
+        if [[ -n "${_ARTIFACTS_BUCKET:-}" ]]; then
+          gsutil -q cp IMAGE_URI.txt IMAGE_URI_DIGEST.txt "gs://$_ARTIFACTS_BUCKET/cloud-run-whisper/$_TAG/"
+          echo "Uploaded to: gs://$_ARTIFACTS_BUCKET/cloud-run-whisper/$_TAG/"
+        fi
+
+# For metadata only (Kaniko already pushes)
+images:
+  - "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/$_IMAGE:$_TAG"
+
+
