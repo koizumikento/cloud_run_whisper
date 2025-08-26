@@ -1,0 +1,256 @@
+---
+alwaysApply: true
+description: "Cloud Run GPU + FastAPI + faster-whisper ガイド（タイムスタンプ対応）"
+---
+
+## Cloud Run で GPU 対応 faster-whisper を FastAPI で動かすためのルール
+
+このルールは、Google Cloud Run の GPU 対応サービス上で `faster-whisper` を用いた音声文字起こし API を `FastAPI` で提供するための推奨構成・実装テンプレート・デプロイ要点をまとめたものです。語彙レベルのタイムスタンプ（word timestamps）出力を前提とします。
+
+参考: [Cloud Run の GPU で faster-whisper を動かす（Zenn）](https://zenn.dev/oddgai/articles/5179ee74e4e174)、[Cloud Run 公式: GPU 設定](https://cloud.google.com/run/docs/configuring/services/gpu?hl=ja)、[NVIDIA cuDNN ダウンロード](https://developer.nvidia.com/cudnn-downloads)、[NVIDIA CUDA ダウンロード](https://developer.nvidia.com/cuda-downloads)
+
+### 推奨ファイルと場所
+- `Dockerfile` → [Dockerfile](mdc:Dockerfile)
+- アプリ本体 → [app/main.py](mdc:app/main.py)
+- 依存定義（推奨）→ [pyproject.toml](mdc:pyproject.toml), [uv.lock](mdc:uv.lock)
+- 依存定義（代替）→ [requirements.txt](mdc:requirements.txt)
+
+必要に応じて `app/` 配下に `__init__.py` を置き、`Hypercorn` を使って HTTP/2 を有効化します（大きな音声ファイルに対応）。
+
+### Dockerfile の要点（テンプレート例・現行 CUDA 12.x 想定）
+以下はベースの考え方（バージョンは環境に合わせて更新）。Cloud Run の GPU ランタイムでは CUDA ランタイムが同梱されますが、`faster-whisper`/`CTranslate2` の実行に必要な `cuBLAS`/`cuDNN` を追加で導入します。大きな .deb を展開後に削除し、イメージをスリム化します。
+
+```dockerfile
+FROM python:3.12-slim-bookworm
+
+# uv (高速 pip 互換) を使用
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+WORKDIR /app
+
+# 依存定義（推奨: pyproject.toml。必要に応じて uv.lock も可）
+COPY pyproject.toml ./
+RUN uv venv --python=python3.12 \
+  && uv sync --no-dev
+
+# CUDA 追加ライブラリ（cuBLAS / cuDNN）を導入
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends wget ca-certificates \
+  \
+  # cuBLAS (CUDA 12.9 例。Cloud Run 環境に合わせて URL/Version を更新)
+  && wget -q https://developer.download.nvidia.com/compute/cuda/12.9.0/local_installers/cuda-repo-debian12-12-9-local_12.9.0-575.51.03-1_amd64.deb \
+  && dpkg -i cuda-repo-debian12-12-9-local_12.9.0-575.51.03-1_amd64.deb \
+  && cp /var/cuda-repo-debian12-12-9-local/cuda-*-keyring.gpg /usr/share/keyrings/ \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends libcublas-12-9 \
+  \
+  # cuDNN (9.10.1 例。Cloud Run 環境に合わせて URL/Version を更新)
+  && wget -q https://developer.download.nvidia.com/compute/cudnn/9.10.1/local_installers/cudnn-local-repo-debian12-9.10.1_1.0-1_amd64.deb \
+  && dpkg -i cudnn-local-repo-debian12-9.10.1_1.0-1_amd64.deb \
+  && cp /var/cudnn-local-repo-debian12-9.10.1/cudnn-*-keyring.gpg /usr/share/keyrings/ \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends cudnn-cuda-12 \
+  \
+  # クリーンアップでサイズ削減
+  && rm -f /usr/share/keyrings/*.gpg \
+  && rm -f /var/cuda-repo-debian12-12-9-local/cuda-*-keyring.gpg \
+  && rm -f /var/cudnn-local-repo-debian12-9.10.1/cudnn-*-keyring.gpg \
+  && rm -f cuda-repo-debian12-12-9-local_12.9.0-575.51.03-1_amd64.deb \
+  && rm -f cudnn-local-repo-debian12-9.10.1_1.0-1_amd64.deb \
+  && apt-get purge -y --auto-remove \
+       cuda-repo-debian12-12-9-local \
+       cudnn-local-repo-debian12-9.10.1 \
+       wget \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
+
+# アプリ配置（必要に応じて）
+COPY app /app
+
+EXPOSE 8080
+CMD ["uv", "run", "hypercorn", "main:app", "--bind", "0.0.0.0:8080", "--access-logfile", "-", "--error-logfile", "-", "--alpn", "h2"]
+```
+
+requirements.txt を使う場合の代替（キャッシュ都合で必要なプロジェクトではこちらでも可）:
+
+```dockerfile
+# 依存定義（代替: requirements.txt）
+COPY requirements.txt ./
+RUN uv venv --python=python3.12 \
+  && uv pip install --no-cache-dir -r requirements.txt
+```
+
+注意:
+- CUDA / cuDNN のバージョンは Cloud Run の GPU ランタイムに合わせて更新してください（上記 URL は一例）。
+- 大きい .deb を削除してイメージサイズを抑制します。
+- HTTP/2 を有効化するため `Hypercorn` を用いています。
+
+### FastAPI 実装の要点（タイムスタンプ出力対応）
+`WhisperModel` を CUDA (`device="cuda"`) で初期化し、`transcribe` 時に `word_timestamps=True` を指定します。応答では `info` と `segments`（`start`/`end`/`text`/`words`）を JSON 化します。
+
+```python
+from dataclasses import asdict
+from fastapi import FastAPI, UploadFile, HTTPException
+from faster_whisper import WhisperModel
+import logging, os
+from shutil import copyfileobj
+from tempfile import NamedTemporaryFile
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI()
+
+# モデルを起動時にロードしてウォームアップ
+MODEL_NAME = os.getenv("WHISPER_MODEL", "large-v3-turbo")
+DEVICE = os.getenv("WHISPER_DEVICE", "cuda")
+COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
+logger.info(f"Loading model: {MODEL_NAME} on {DEVICE} ({COMPUTE_TYPE})")
+model = WhisperModel(MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
+
+@app.post("/transcribe")
+def transcribe_audio(upload_file: UploadFile):
+    temp_path = None
+    try:
+        with NamedTemporaryFile(delete=False, suffix=f"-{upload_file.filename}") as tmp:
+            temp_path = tmp.name
+            copyfileobj(upload_file.file, tmp)
+
+        segments, info = model.transcribe(
+            temp_path,
+            word_timestamps=True,
+        )
+
+        seg_dicts = []
+        for seg in segments:
+            seg_dicts.append({
+                "id": seg.id,
+                "start": seg.start,
+                "end": seg.end,
+                "text": seg.text,
+                "words": [
+                    {
+                        "start": w.start,
+                        "end": w.end,
+                        "word": w.word,
+                        "prob": getattr(w, "probability", None),
+                    }
+                    for w in (seg.words or [])
+                ],
+            })
+
+        return {"info": asdict(info), "segments": seg_dicts}
+    except Exception as e:
+        logger.exception("transcribe failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+```
+
+ポイント:
+- `word_timestamps=True` で語彙レベルの開始/終了時刻を取得。
+- `compute_type=float16` を既定にして推論を高速化（GPU 前提）。
+- 大きいファイル想定のため一時ファイルに保存してから処理。
+
+### pyproject.toml（推奨。`requirements.txt` は任意）
+
+```toml
+[project]
+name = "whisper-api"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi",
+  "hypercorn",
+  "faster-whisper",
+  "uvicorn", # 任意（ローカル検証用）
+]
+```
+
+`requirements.txt` を使いたい場合の最小例（オプション）:
+
+```text
+fastapi
+hypercorn
+faster-whisper
+uvicorn
+```
+
+メモ:
+- `faster-whisper` は内部で `CTranslate2` を使用。GPU ランタイムに CUDA のランタイムライブラリ（cuBLAS/cuDNN）が存在すれば GPU を自動利用します。
+- 追加で `numpy` 等が必要な場合は適宜追加。
+
+### Cloud Run デプロイ要点
+- ビルド例:
+
+```bash
+gcloud builds submit --tag gcr.io/$(gcloud config get-value project)/whisper-api
+```
+
+- デプロイ例（CLI の仕様により `--accelerator` または `--gpu` を使用。公式ドキュメントを参照）:
+
+```bash
+# 新フラグ例（推奨: 公式の最新を参照）
+gcloud run deploy whisper-api \
+  --image gcr.io/$(gcloud config get-value project)/whisper-api \
+  --region=asia-northeast1 \
+  --platform=managed \
+  --accelerator=type=nvidia-l4,count=1 \
+  --memory=16Gi \
+  --cpu=4 \
+  --concurrency=1 \
+  --port=8080 \
+  --min-instances=1 \
+  --max-instances=2 \
+  --timeout=3600 \
+  --allow-unauthenticated
+
+# 旧フラグ例（環境により）
+# --gpu=1 --gpu-type=nvidia-l4 等
+```
+
+運用ヒント:
+- 大きいアップロードに備え HTTP/2 を有効化（`Hypercorn`）。
+- モデルを起動時ロードし、`--min-instances` でコールドスタートを抑制。
+- キャッシュを活用する場合は `XDG_CACHE_HOME=/var/cache` 等を設定し、レイヤ化を検討。
+
+### テスト例
+
+```bash
+curl -X POST \
+  --form "upload_file=@data/sample_audio.mp3" \
+  http://localhost:8080/transcribe | jq .
+```
+
+### ローカル開発（uv での環境構築）
+
+以下はローカルで `uv` を用いて仮想環境を作り、FastAPI サーバーを起動する手順です（pyproject.toml 前提）。
+
+```bash
+# 1) uv が無い場合はインストール（macOS/Homebrew 例）
+brew install uv
+
+# 2) プロジェクト直下で venv 作成と依存導入
+uv venv --python=python3.12
+uv sync --dev
+
+# 3) 実行（ローカル検証）
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8080 --log-level info
+
+# 4) 動作確認
+curl -X POST \
+  --form "upload_file=@data/sample_audio.mp3" \
+  http://localhost:8080/transcribe | jq .
+```
+
+補足:
+- `uv run` は venv を自動解決します。エディタの Python Interpreter は `.venv` を指すように設定してください。
+- GPU 使用は Cloud Run で有効になります。ローカル GPU を利用したい場合は CUDA/cuDNN のセットアップと `faster-whisper` の `compute_type` を環境に合わせて調整してください。
+
+### 参考
+- Zenn 記事: https://zenn.dev/oddgai/articles/5179ee74e4e174
+- Cloud Run GPU 公式: https://cloud.google.com/run/docs/configuring/services/gpu?hl=ja
+- NVIDIA cuDNN: https://developer.nvidia.com/cudnn-downloads
+- NVIDIA CUDA: https://developer.nvidia.com/cuda-downloads
+
