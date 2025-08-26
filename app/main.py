@@ -1,6 +1,5 @@
 import logging
 import os
-from dataclasses import asdict
 from shutil import copyfileobj
 from tempfile import NamedTemporaryFile
 from typing import Any
@@ -10,6 +9,7 @@ from faster_whisper import WhisperModel
 from pydantic import BaseModel
 
 from .settings import settings
+from .services.transcription_service import TranscriptionService
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -77,32 +77,8 @@ def transcribe_audio(upload_file: UploadFile) -> TranscribeResponse:
             temp_path = tmp.name
             copyfileobj(upload_file.file, tmp)
 
-        segments, info = model.transcribe(
-            temp_path,
-            word_timestamps=True,
-        )
-
-        segment_dicts: list[dict[str, Any]] = []
-        for seg in segments:
-            segment_dicts.append(
-                {
-                    "id": seg.id,
-                    "start": seg.start,
-                    "end": seg.end,
-                    "text": seg.text,
-                    "words": [
-                        {
-                            "start": w.start,
-                            "end": w.end,
-                            "word": w.word,
-                            "prob": getattr(w, "probability", None),
-                        }
-                        for w in (seg.words or [])
-                    ],
-                }
-            )
-
-        return {"info": asdict(info), "segments": segment_dicts}
+        service = TranscriptionService(model)
+        return service.transcribe_file(temp_path, word_timestamps=True)
     except Exception as e:  # noqa: BLE001
         logger.exception("transcribe failed")
         raise HTTPException(status_code=500, detail=str(e)) from e
