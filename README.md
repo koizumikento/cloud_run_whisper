@@ -59,6 +59,75 @@ containers {
 
 ---
 
+## Docker Hub へローカルから公開（publish_dockerhub.sh）
+
+Cloud Build を使わずにローカルから Docker Hub へ公開する場合は、次のスクリプトを使用します。
+
+### 使い方（Bash）
+
+```bash
+chmod +x scripts/publish_dockerhub.sh
+
+# 事前に docker login 済み or 環境変数で認証情報を渡す
+# DOCKERHUB_USERNAME/DOCKERHUB_PASSWORD は省略可（docker login 済みなら不要）
+
+DOCKERHUB_USERNAME=yourname DOCKERHUB_PASSWORD=xxxx \
+  ./scripts/publish_dockerhub.sh --repo yourname/cloud-run-whisper --tag 1.0.0
+
+# latest も同時付与
+LATEST=1 ./scripts/publish_dockerhub.sh --repo yourname/cloud-run-whisper --tag 1.0.0
+```
+
+公開後の参照例（Cloud Run デプロイ時）:
+
+```bash
+gcloud run deploy cloud-run-whisper \
+  --image docker.io/yourname/cloud-run-whisper:1.0.0 \
+  --region=asia-northeast1 --platform=managed \
+  --accelerator=type=nvidia-l4,count=1 \
+  --memory=16Gi --cpu=4 --concurrency=1 --timeout=3600 \
+  --port=8080 \
+  --set-env-vars=XDG_CACHE_HOME=/root/.cache,WHISPER_MODEL=large-v3,WHISPER_DEVICE=cuda,WHISPER_COMPUTE_TYPE=float16 \
+  --allow-unauthenticated
+```
+
+注意:
+
+- Docker Hub は pull レート制限があるため、公開用途ではタグ運用と README での注意書きの追加を推奨します。
+- Cloud Run で Docker Hub から直接 pull する場合、Private repo のときはデプロイ時にレジストリ認証の設定が必要です。
+
+### オプション
+
+- `--repo/-r`（必須）: Docker Hub のリポジトリ名（例: `yourname/cloud-run-whisper`）
+- `--tag/-t`（任意）: 付与するタグ（省略時は `git describe` かタイムスタンプ）
+- `--username/-u`（任意）: `DOCKERHUB_USERNAME` と同義。`docker login` 済みなら不要
+- 環境変数 `DOCKERHUB_USERNAME`/`DOCKERHUB_PASSWORD`: 非対話ログイン用（任意）
+- 環境変数 `LATEST=1`: `:latest` タグも同時に push（既定は 0）
+
+### クイック手順
+
+1) どちらかで認証
+
+- 事前に対話ログイン: `docker login`
+- もしくは環境変数で指定しつつ実行:
+
+```bash
+DOCKERHUB_USERNAME=yourname DOCKERHUB_PASSWORD=xxxx \
+  ./scripts/publish_dockerhub.sh --repo yourname/cloud-run-whisper --tag 1.0.0
+```
+
+2) `latest` も付ける場合:
+
+```bash
+LATEST=1 ./scripts/publish_dockerhub.sh --repo yourname/cloud-run-whisper --tag 1.0.0
+```
+
+補足（Windows）:
+
+- Windows では Git Bash もしくは WSL の Bash で実行してください（PowerShell ではなく）。
+
+---
+
 ## Cloud Run へ直接デプロイ（参考）
 
 ```bash
