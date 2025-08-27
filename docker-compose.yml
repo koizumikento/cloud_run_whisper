@@ -19,6 +19,15 @@ x-api-common: &api_common
 services:
   api:
     <<: *api_common
+    container_name: cloud-run-whisper-cpu
+    environment:
+      - XDG_CACHE_HOME=/root/.cache
+      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
+      - WHISPER_DEVICE=cpu
+      - WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
+
+  api-gpu:
+    <<: *api_common
     container_name: cloud-run-whisper-gpu
     profiles:
       - gpu
