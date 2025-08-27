@@ -24,18 +24,15 @@ apt-get update \
   && apt-get update \
   && apt-get install -y --no-install-recommends cudnn-cuda-12 \
   \
-  # クリーンアップでサイズ削減
-  && rm -f /usr/share/keyrings/*.gpg \
-  && rm -f /var/cuda-repo-debian12-12-9-local/cuda-*-keyring.gpg \
-  && rm -f /var/cudnn-local-repo-debian12-9.10.1/cudnn-*-keyring.gpg \
-  && rm -f cuda-repo-debian12-12-9-local_12.9.0-575.51.03-1_amd64.deb \
-  && rm -f cudnn-local-repo-debian12-9.10.1_1.0-1_amd64.deb \
-  && apt-get purge -y --auto-remove \
-       cuda-repo-debian12-12-9-local \
-       cudnn-local-repo-debian12-9.10.1 \
-       wget \
-  && apt-get clean \
-  && rm -rf /var/lib/apt/lists/*
+## 不要なファイルを削除
+rm -f /usr/share/keyrings/*.gpg  && \
+rm -f /var/cuda-repo-debian12-12-9-local/cuda-*-keyring.gpg && \
+rm -f /var/cudnn-local-repo-debian12-9.10.1/cudnn-*-keyring.gpg && \
+rm -f cuda-repo-debian12-12-9-local_12.9.0-575.51.03-1_amd64.deb && \
+rm -f cudnn-local-repo-debian12-9.10.1_1.0-1_amd64.deb && \
+apt purge -y --auto-remove cuda-repo-debian12-12-9-local cudnn-local-repo-debian12-9.10.1 && \
+apt purge -y --auto-remove wget && \
+apt clean
 
 echo "[setup_cuda] cuBLAS/cuDNN setup completed"
 

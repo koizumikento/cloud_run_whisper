@@ -24,6 +24,5 @@ ENV XDG_CACHE_HOME=/root/.cache
 RUN uv run python /app/scripts/download_model.py --device cpu
 
 EXPOSE 8080
-CMD ["uv", "run", "hypercorn", "main:app", "--bind", "0.0.0.0:8080", "--access-logfile", "-", "--error-logfile", "-", "--alpn", "h2"]
-
+CMD ["uv", "run", "hypercorn", "main:app", "--bind", "0.0.0.0:8080", "--access-logfile", "-", "--error-logfile","-"]
 
