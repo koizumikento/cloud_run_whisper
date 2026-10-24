@@ -1,3 +1,34 @@
+## Python certificate baseline (2026-10)
+
+The application requires `certifi>=2026.10.19` and declares uv `>=0.13.5`.
+The container uses uv 0.13.5,
+upgrades installed pip to at least 26.2.2, and checks Debian bookworm's
+`ca-certificates>=20250419~deb12u2` before Python/NVIDIA downloads. These are
+separate trust stores; updating application certifi alone does not update them.
+Model predownload and server startup use `uv run --no-sync` to retain the
+environment installed by `uv sync --no-dev` during the build.
+
+For local development, upgrade uv to at least 0.13.5 (very old uv versions can
+ignore `required-version` with a warning) and refresh existing
+environments with `uv sync --upgrade`. Update system/custom CA stores separately.
+If an existing environment uses pip, update its pip separately following the
+[Python security announcement](https://blog.python.org/2026/10/python-3151-3149-31317/).
+The Docker pip upgrade does not replace Python 3.12's bundled `ensurepip` wheel;
+new pip-seeded environments need the same review. The container's uv environment
+does not seed pip.
+
+Rebuild images with fresh base images and package layers (`docker build --pull
+--no-cache .`) when publishing an update. Existing images/deployments are not
+updated by this source change. Dependencies remain unlocked across builds; the
+version floors are a certificate baseline, not a claim that all CVEs are fixed.
+No application tar extraction path was found, and no speculative tar workaround
+is included.
+
+References: [certifi advisory](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2),
+[uv advisory](https://github.com/astral-sh/uv/security/advisories/GHSA-hq85-5cpj-mr62),
+[uv 0.13.5](https://github.com/astral-sh/uv/releases/tag/0.13.5),
+[Debian bookworm CA package](https://packages.debian.org/bookworm/ca-certificates).
+
 ## Cloud Run Whisper (GPU) 概要
 
 `faster-whisper` を `FastAPI` で提供し、Cloud Run GPU（例: NVIDIA L4）で動かすためのプロジェクトです。

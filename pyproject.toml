@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "certifi>=2026.10.19",
     "fastapi",
     "faster-whisper",
     "hypercorn",
@@ -40,6 +41,7 @@ addopts = "-q --cov=app --cov-report=term-missing:skip-covered"
 testpaths = ["tests"]
 
 [tool.uv]
+required-version = ">=0.13.5"
 dev-dependencies = [
   "ruff",
   "pytest",
