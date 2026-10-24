@@ -29,6 +29,30 @@ References: [certifi advisory](https://github.com/certifi/python-certifi/securit
 [uv 0.13.5](https://github.com/astral-sh/uv/releases/tag/0.13.5),
 [Debian bookworm CA package](https://packages.debian.org/bookworm/ca-certificates).
 
+### Model-free container smoke tests
+
+The container keeps the `app` package at `/app/app` and starts `app.main:app`.
+Shell scripts use LF endings. CUDA setup runs fail-fast commands and removes only
+the NVIDIA keyrings it copied, preserving Debian archive verification keys.
+
+To test the exact application layout and default CMD without CUDA/model downloads:
+
+```bash
+sed \
+  -e 's@^RUN bash -n /app/scripts/setup_cuda.sh && bash /app/scripts/setup_cuda.sh$@RUN bash -n /app/scripts/setup_cuda.sh@' \
+  -e 's@^RUN uv run --no-sync python /app/scripts/download_model.py --device cpu$@# Model download omitted for smoke test@' \
+  Dockerfile > /tmp/cloud-run-whisper-smoke.Dockerfile
+docker build -f /tmp/cloud-run-whisper-smoke.Dockerfile --iidfile /tmp/whisper-smoke-image .
+WHISPER_SMOKE_IMAGE="$(cat /tmp/whisper-smoke-image)" uv run pytest
+```
+
+The three Docker tests require `WHISPER_SMOKE_IMAGE`; otherwise they are skipped.
+They run with networking disabled and no published ports. Startup disables model
+loading and checks `/health` through the default Hypercorn command. The cleanup
+test stubs package/download commands inside a disposable container and verifies
+that existing distribution keyrings retain their contents. These checks do not
+validate real CUDA installation or inference.
+
 ## Cloud Run Whisper (GPU) 概要
 
 `faster-whisper` を `FastAPI` で提供し、Cloud Run GPU（例: NVIDIA L4）で動かすためのプロジェクトです。

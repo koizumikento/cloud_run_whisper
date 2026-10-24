@@ -21,10 +21,10 @@ RUN uv venv --python=python3.12 \
 
 # CUDA 追加ライブラリ（cuBLAS / cuDNN）を導入（スクリプト化）
 COPY scripts/setup_cuda.sh /app/scripts/setup_cuda.sh
-RUN bash /app/scripts/setup_cuda.sh
+RUN bash -n /app/scripts/setup_cuda.sh && bash /app/scripts/setup_cuda.sh
 
 # アプリ配置
-COPY app /app
+COPY app /app/app
 COPY scripts /app/scripts
 
 # モデル事前ダウンロード（ビルド時）
@@ -33,5 +33,5 @@ ENV XDG_CACHE_HOME=/root/.cache
 RUN uv run --no-sync python /app/scripts/download_model.py --device cpu
 
 EXPOSE 8080
-CMD ["uv", "run", "--no-sync", "hypercorn", "main:app", "--bind", "0.0.0.0:8080", "--access-logfile", "-", "--error-logfile","-"]
+CMD ["uv", "run", "--no-sync", "hypercorn", "app.main:app", "--bind", "0.0.0.0:8080", "--access-logfile", "-", "--error-logfile","-"]
 
